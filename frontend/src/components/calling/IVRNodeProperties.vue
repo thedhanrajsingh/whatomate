@@ -385,10 +385,6 @@ const greetingTab = computed(() =>
     <!-- Timing: schedule -->
     <template v-if="node.type === 'timing'">
       <div class="space-y-1.5">
-        <Label class="text-xs">Timezone</Label>
-        <Input :model-value="config.timezone || 'UTC'" @update:model-value="(v: string) => updateConfig('timezone', v)" class="h-8 text-sm" placeholder="e.g. Asia/Kolkata" />
-      </div>
-      <div class="space-y-1.5">
         <Label class="text-xs">Schedule</Label>
         <div v-for="(entry, idx) in schedule" :key="idx" class="flex items-center gap-1.5 text-xs">
           <span class="w-12 capitalize">{{ entry.day.slice(0, 3) }}</span>

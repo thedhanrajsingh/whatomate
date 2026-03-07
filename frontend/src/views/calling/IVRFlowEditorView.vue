@@ -107,7 +107,7 @@ function addNodeFromPalette(type: IVRNodeType) {
     http_callback: { url: '', method: 'GET', headers: {}, body_template: '', timeout_seconds: 10 },
     transfer: { team_id: '' },
     goto_flow: { flow_id: '' },
-    timing: { timezone: 'UTC', schedule: [
+    timing: { schedule: [
       { day: 'monday', enabled: true, start_time: '09:00', end_time: '17:00' },
       { day: 'tuesday', enabled: true, start_time: '09:00', end_time: '17:00' },
       { day: 'wednesday', enabled: true, start_time: '09:00', end_time: '17:00' },
