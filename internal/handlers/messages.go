@@ -309,10 +309,32 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 // buildInteractiveData creates the InteractiveData JSONB for interactive and template messages
 func (a *App) buildInteractiveData(req OutgoingMessageRequest) models.JSONB {
 	// Template buttons: stored as JSONBArray on Template.Buttons
+	// Resolve dynamic URL params (e.g., {{1}}) before storing
 	if req.Template != nil && len(req.Template.Buttons) > 0 {
+		buttons := make([]interface{}, len(req.Template.Buttons))
+		for i, btn := range req.Template.Buttons {
+			btnMap, ok := btn.(map[string]interface{})
+			if !ok {
+				buttons[i] = btn
+				continue
+			}
+			resolved := make(map[string]interface{})
+			for k, v := range btnMap {
+				resolved[k] = v
+			}
+			if resolved["type"] == "URL" {
+				if urlStr, ok := resolved["url"].(string); ok {
+					idx := fmt.Sprintf("%d", i)
+					if val, exists := req.ButtonURLParams[idx]; exists {
+						resolved["url"] = templateutil.ParameterPattern.ReplaceAllString(urlStr, val)
+					}
+				}
+			}
+			buttons[i] = resolved
+		}
 		return models.JSONB{
 			"type":    "button",
-			"buttons": req.Template.Buttons,
+			"buttons": buttons,
 		}
 	}
 

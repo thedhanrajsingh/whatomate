@@ -1123,7 +1123,7 @@ function getGoogleMapsUrl(location: LocationData): string {
   return `https://www.google.com/maps?q=${location.latitude},${location.longitude}`
 }
 
-function getInteractiveButtons(message: Message): Array<{ id: string; title: string }> {
+function getInteractiveButtons(message: Message): Array<{ id: string; title: string; type: string; url: string }> {
   if (!message.interactive_data) {
     return []
   }
@@ -1138,7 +1138,9 @@ function getInteractiveButtons(message: Message): Array<{ id: string; title: str
   }
   return items.map((btn: any) => ({
     id: btn.reply?.id || btn.id || '',
-    title: btn.reply?.title || btn.title || btn.text || ''
+    title: btn.reply?.title || btn.title || btn.text || '',
+    type: btn.type || 'QUICK_REPLY',
+    url: btn.url || ''
   }))
 }
 
@@ -1910,16 +1912,24 @@ async function sendMediaMessage() {
                   v-if="getInteractiveButtons(message).length > 0"
                   class="interactive-buttons mt-2 -mx-2 -mb-1.5 border-t"
                 >
-                  <div
-                    v-for="(btn, index) in getInteractiveButtons(message)"
-                    :key="btn.id"
-                    :class="[
-                      'py-2 text-sm text-center font-medium cursor-pointer',
-                      index > 0 && 'border-t'
-                    ]"
-                  >
-                    {{ btn.title }}
-                  </div>
+                  <template v-for="(btn, index) in getInteractiveButtons(message)" :key="btn.id">
+                    <a
+                      v-if="btn.type === 'URL' && btn.url"
+                      :href="btn.url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      :class="['py-2 text-sm text-center font-medium cursor-pointer flex items-center justify-center gap-1.5', index > 0 && 'border-t']"
+                    >
+                      <ExternalLink class="h-3.5 w-3.5" />
+                      {{ btn.title }}
+                    </a>
+                    <div
+                      v-else
+                      :class="['py-2 text-sm text-center font-medium cursor-pointer', index > 0 && 'border-t']"
+                    >
+                      {{ btn.title }}
+                    </div>
+                  </template>
                 </div>
                 <!-- CTA URL button - WhatsApp style -->
                 <a

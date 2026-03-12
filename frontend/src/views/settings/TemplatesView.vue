@@ -321,7 +321,10 @@ function openEditDialog(template: Template) {
     header_content: template.header_content || '',
     body_content: template.body_content,
     footer_content: template.footer_content || '',
-    buttons: template.buttons || [],
+    buttons: (template.buttons || []).map((b: any) => ({
+      ...b,
+      example: Array.isArray(b.example) ? b.example[0] ?? '' : b.example,
+    })),
     sample_values: template.sample_values || []
   }
   // Reset header media state (will show existing handle if present)
