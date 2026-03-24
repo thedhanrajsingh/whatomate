@@ -2,7 +2,9 @@ package calling
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,6 +70,14 @@ func (m *Manager) initiateTransfer(session *CallSession, waAccount string, teamT
 	m.db.Model(&models.CallLog{}).
 		Where("id = ?", session.CallLogID).
 		Update("status", models.CallStatusTransferring)
+
+	// Fire on_waiting callback
+	session.mu.Lock()
+	cb := session.TransferCallbacks
+	session.mu.Unlock()
+	if cb != nil {
+		m.fireTransferCallback(session, cb.OnWaiting, buildTransferVars(&transfer))
+	}
 
 	// Update session state
 	session.mu.Lock()
@@ -491,6 +501,20 @@ func (m *Manager) completeTransferConnection(session *CallSession, transferID, a
 	m.db.Model(&models.CallLog{}).
 		Where("id = ?", session.CallLogID).
 		Update("agent_id", agentID)
+
+	// Fire on_connect callback
+	session.mu.Lock()
+	cbConnect := session.TransferCallbacks
+	session.mu.Unlock()
+	if cbConnect != nil && cbConnect.OnConnect != nil {
+		// Reload transfer with updated fields for the callback
+		var updatedTransfer models.CallTransfer
+		if m.db.First(&updatedTransfer, transferID).Error == nil {
+			vars := buildTransferVars(&updatedTransfer)
+			m.addAgentVars(vars, agentID)
+			m.fireTransferCallback(session, cbConnect.OnConnect, vars)
+		}
+	}
 
 	session.mu.Lock()
 	session.TransferStatus = models.CallTransferStatusConnected
@@ -972,5 +996,116 @@ func (m *Manager) findSessionByTransferID(transferID uuid.UUID) *CallSession {
 		}
 	}
 	return nil
+}
+
+// parseTransferCallbacks extracts HTTP callback configs from a transfer IVR node's config map.
+func parseTransferCallbacks(config map[string]interface{}) *TransferCallbacks {
+	cb := &TransferCallbacks{}
+	cb.OnWaiting = parseOneCallback(config, "on_waiting")
+	cb.OnConnect = parseOneCallback(config, "on_connect")
+	if cb.OnWaiting == nil && cb.OnConnect == nil {
+		return nil
+	}
+	return cb
+}
+
+func parseOneCallback(config map[string]interface{}, key string) *TransferHTTPCallback {
+	raw, ok := config[key].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	url, _ := raw["url"].(string)
+	if url == "" {
+		return nil
+	}
+	method, _ := raw["method"].(string)
+	bodyTemplate, _ := raw["body_template"].(string)
+
+	headers := make(map[string]string)
+	if hdrs, ok := raw["headers"].(map[string]interface{}); ok {
+		for k, v := range hdrs {
+			if s, ok := v.(string); ok {
+				headers[k] = s
+			}
+		}
+	}
+
+	return &TransferHTTPCallback{
+		URL:          url,
+		Method:       method,
+		Headers:      headers,
+		BodyTemplate: bodyTemplate,
+	}
+}
+
+// fireTransferCallback runs an HTTP callback asynchronously with interpolated template variables.
+func (m *Manager) fireTransferCallback(session *CallSession, hook *TransferHTTPCallback, vars map[string]string) {
+	if hook == nil || hook.URL == "" {
+		return
+	}
+	go func() {
+		url := interpolateTemplate(hook.URL, vars)
+		body := interpolateTemplate(hook.BodyTemplate, vars)
+		headers := make(map[string]string)
+		for k, v := range hook.Headers {
+			headers[k] = interpolateTemplate(v, vars)
+		}
+		method := hook.Method
+		if method == "" {
+			method = "POST"
+		}
+		result, err := executeHTTPCallback(url, method, headers, body, 10*time.Second)
+		if err != nil {
+			m.log.Error("Transfer callback failed", "error", err, "call_id", session.ID, "hook_url", url)
+		} else {
+			m.log.Info("Transfer callback completed", "call_id", session.ID, "hook_url", url, "status", result.StatusCode)
+		}
+	}()
+}
+
+// buildTransferVars builds the template variable map for transfer callbacks.
+func buildTransferVars(transfer *models.CallTransfer) map[string]string {
+	vars := map[string]string{
+		"caller_phone":     transfer.CallerPhone,
+		"contact_id":       transfer.ContactID.String(),
+		"call_log_id":      transfer.CallLogID.String(),
+		"transfer_id":      transfer.ID.String(),
+		"whatsapp_account": transfer.WhatsAppAccount,
+		"status":           string(transfer.Status),
+	}
+	if transfer.TeamID != nil {
+		vars["team_id"] = transfer.TeamID.String()
+	}
+	if transfer.AgentID != nil {
+		vars["agent_id"] = transfer.AgentID.String()
+	}
+	if transfer.InitiatingAgentID != nil {
+		vars["initiating_agent_id"] = transfer.InitiatingAgentID.String()
+	}
+	vars["transferred_at"] = transfer.TransferredAt.Format(time.RFC3339)
+	if transfer.ConnectedAt != nil {
+		vars["connected_at"] = transfer.ConnectedAt.Format(time.RFC3339)
+	}
+	if transfer.CompletedAt != nil {
+		vars["completed_at"] = transfer.CompletedAt.Format(time.RFC3339)
+	}
+	vars["hold_duration"] = strconv.Itoa(transfer.HoldDuration)
+	vars["talk_duration"] = strconv.Itoa(transfer.TalkDuration)
+	if transfer.IVRPath != nil {
+		if b, err := json.Marshal(transfer.IVRPath); err == nil {
+			vars["ivr_path"] = string(b)
+		}
+	}
+	return vars
+}
+
+// addAgentVars loads agent details from DB and adds them to the vars map.
+func (m *Manager) addAgentVars(vars map[string]string, agentID uuid.UUID) {
+	var user models.User
+	if err := m.db.Select("id, full_name, email").Where("id = ?", agentID).First(&user).Error; err == nil {
+		vars["agent_id"] = user.ID.String()
+		vars["agent_email"] = user.Email
+		vars["agent_name"] = user.FullName
+	}
 }
 
