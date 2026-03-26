@@ -481,41 +481,9 @@ func (m *Manager) completeTransferConnection(session *CallSession, transferID, a
 	}
 	session.mu.Unlock()
 
-	// Signal that bridge is taking over the caller track
-	session.mu.Lock()
-	safeClose(session.BridgeStarted)
-	session.mu.Unlock()
-
-	// Update transfer status
-	now := time.Now()
-	m.db.Model(&models.CallTransfer{}).
-		Where("id = ?", transferID).
-		Updates(map[string]any{
-			"status":       models.CallTransferStatusConnected,
-			"agent_id":     agentID,
-			"connected_at": now,
-		})
-
-	// Also set agent_id on the CallLog so the webhook "ended" handler
-	// knows an agent was connected and doesn't mark the call as "missed".
-	m.db.Model(&models.CallLog{}).
-		Where("id = ?", session.CallLogID).
-		Update("agent_id", agentID)
-
-	// Fire on_connect callback
-	session.mu.Lock()
-	cbConnect := session.TransferCallbacks
-	session.mu.Unlock()
-	if cbConnect != nil && cbConnect.OnConnect != nil {
-		// Reload transfer with updated fields for the callback
-		var updatedTransfer models.CallTransfer
-		if m.db.First(&updatedTransfer, transferID).Error == nil {
-			vars := buildTransferVars(&updatedTransfer)
-			m.addAgentVars(vars, agentID)
-			m.fireTransferCallback(session, cbConnect.OnConnect, vars)
-		}
-	}
-
+	// Prepare track references and bridge BEFORE signaling BridgeStarted
+	// so the bridge can start reading immediately — no gap where caller
+	// RTP packets are dropped.
 	session.mu.Lock()
 	session.TransferStatus = models.CallTransferStatusConnected
 	var callerRemote *webrtc.TrackRemote
@@ -530,13 +498,51 @@ func (m *Manager) completeTransferConnection(session *CallSession, transferID, a
 	agentLocal := session.AgentAudioTrack
 	session.mu.Unlock()
 
+	bridge := m.setupAudioBridge(session)
+
+	// Signal that bridge is taking over the caller track
+	session.mu.Lock()
+	safeClose(session.BridgeStarted)
+	session.mu.Unlock()
+
+	// Run DB updates and callbacks in background so the bridge starts
+	// forwarding audio immediately without waiting for I/O.
+	go func() {
+		now := time.Now()
+		m.db.Model(&models.CallTransfer{}).
+			Where("id = ?", transferID).
+			Updates(map[string]any{
+				"status":       models.CallTransferStatusConnected,
+				"agent_id":     agentID,
+				"connected_at": now,
+			})
+
+		// Also set agent_id on the CallLog so the webhook "ended" handler
+		// knows an agent was connected and doesn't mark the call as "missed".
+		m.db.Model(&models.CallLog{}).
+			Where("id = ?", session.CallLogID).
+			Update("agent_id", agentID)
+
+		// Fire on_connect callback
+		session.mu.Lock()
+		cbConnect := session.TransferCallbacks
+		session.mu.Unlock()
+		if cbConnect != nil && cbConnect.OnConnect != nil {
+			var updatedTransfer models.CallTransfer
+			if m.db.First(&updatedTransfer, transferID).Error == nil {
+				vars := buildTransferVars(&updatedTransfer)
+				m.addAgentVars(vars, agentID)
+				m.fireTransferCallback(session, cbConnect.OnConnect, vars)
+			}
+		}
+	}()
+
 	m.log.Info("Call transfer connected",
 		"transfer_id", transferID,
 		"agent_id", agentID,
 	)
 
-	// Create recorder and start audio bridge (blocks until stopped)
-	bridge := m.setupAudioBridge(session)
+	// Start audio bridge (blocks until stopped)
 	bridge.Start(callerRemote, agentLocal, agentRemoteTrack, callerLocal)
 }
 
@@ -723,6 +729,15 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 
 		triedAgents = append(triedAgents, *agentID)
 
+		// Skip agents who are not online (no active WebSocket connection)
+		if !m.wsHub.IsUserOnline(orgID, *agentID) {
+			m.log.Debug("Rotation: skipping offline agent",
+				"transfer_id", transfer.ID,
+				"agent_id", *agentID,
+			)
+			continue
+		}
+
 		// Update DB: set agent_id and tried_agent_ids
 		triedIDs := make(models.JSONBArray, len(triedAgents))
 		for i, id := range triedAgents {
@@ -802,28 +817,37 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 		return
 	}
 
-	// Fallback: broadcast to all remaining available team members
+	// Fallback: broadcast to all remaining available AND online team members
 	remaining := m.assigner.GetAvailableAgents(teamID, triedAgents)
-	if len(remaining) > 0 {
-		// Clear agent_id so any team member can accept
-		m.db.Model(&models.CallTransfer{}).Where("id = ?", transfer.ID).
-			Update("agent_id", nil)
-
-		fallbackPayload := make(map[string]any)
-		for k, v := range basePayload {
-			fallbackPayload[k] = v
-		}
-		fallbackPayload["broadcast_fallback"] = true
-		m.wsHub.BroadcastToUsers(orgID, remaining, websocket.WSMessage{
-			Type:    websocket.TypeCallTransferWaiting,
-			Payload: fallbackPayload,
-		})
-
-		m.log.Info("Rotation exhausted, broadcasting to remaining team",
+	remaining = m.wsHub.FilterOnlineUsers(orgID, remaining)
+	if len(remaining) == 0 {
+		// No agents online — go straight to no_answer instead of
+		// holding the caller on hold music for the full timeout.
+		m.log.Info("No agents online for transfer, ending immediately",
 			"transfer_id", transfer.ID,
-			"remaining_agents", len(remaining),
 		)
+		m.handleTransferNoAnswer(session, transfer.ID)
+		return
 	}
+
+	// Clear agent_id so any team member can accept
+	m.db.Model(&models.CallTransfer{}).Where("id = ?", transfer.ID).
+		Update("agent_id", nil)
+
+	fallbackPayload := make(map[string]any)
+	for k, v := range basePayload {
+		fallbackPayload[k] = v
+	}
+	fallbackPayload["broadcast_fallback"] = true
+	m.wsHub.BroadcastToUsers(orgID, remaining, websocket.WSMessage{
+		Type:    websocket.TypeCallTransferWaiting,
+		Payload: fallbackPayload,
+	})
+
+	m.log.Info("Rotation exhausted, broadcasting to remaining team",
+		"transfer_id", transfer.ID,
+		"remaining_agents", len(remaining),
+	)
 
 	// Wait for total timeout or acceptance
 	session.mu.Lock()
