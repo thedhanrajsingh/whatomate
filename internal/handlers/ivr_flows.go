@@ -310,9 +310,12 @@ func diffIVRMenuNodes(db *gorm.DB, oldMenu, newMenu models.JSONB) []map[string]a
 			if !ok {
 				continue
 			}
-			b, _ := json.Marshal(m)
+			b, err := json.Marshal(m)
+			if err != nil {
+				continue
+			}
 			var n ivrNode
-			json.Unmarshal(b, &n)
+			_ = json.Unmarshal(b, &n)
 			if n.ID != "" {
 				result[n.ID] = n
 			}
