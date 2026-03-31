@@ -79,8 +79,8 @@ test.describe('Keyword Rules - List View', () => {
       hasRows = true
     }
 
-    const deleteBtn = page.locator('tbody tr').first().locator('button.text-destructive, button:has(svg.text-destructive)').first()
-    if (!(await deleteBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
+    const deleteBtn = page.locator('tbody tr').first().getByRole('button', { name: /delete/i })
+    if (!(await deleteBtn.isVisible({ timeout: 5000 }).catch(() => false))) {
       test.skip(true, 'No delete button found')
       return
     }

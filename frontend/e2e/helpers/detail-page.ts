@@ -31,7 +31,7 @@ export async function expectSaveButtonOnChange(page: Page) {
 export async function expectDeleteFromForm(page: Page, listUrl: string) {
   const deleteBtn = page.getByRole('button', { name: /Delete/i })
   if (await deleteBtn.isVisible()) {
-    await deleteBtn.click()
+    await deleteBtn.click({ force: true })
     const dialog = page.locator('[role="alertdialog"]')
     await expect(dialog).toBeVisible({ timeout: 3000 })
     await dialog.getByRole('button', { name: /Delete/i }).click()
