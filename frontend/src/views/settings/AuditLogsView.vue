@@ -16,7 +16,7 @@ import { auditLogsService, type AuditLogEntry } from '@/services/api'
 import { useUsersStore } from '@/stores/users'
 import { useDateRange } from '@/composables/useDateRange'
 import { ScrollText } from 'lucide-vue-next'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatLabel } from '@/lib/utils'
 
 const { t } = useI18n()
 const usersStore = useUsersStore()
@@ -101,15 +101,11 @@ function actionVariant(action: string): string {
   }
 }
 
-function formatFieldName(name: string): string {
-  return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
-
 function changeSummary(log: AuditLogEntry): string {
   if (!log.changes || log.changes.length === 0) return '—'
   if (log.action === 'created') return `${log.changes.length} fields set`
   if (log.action === 'deleted') return `${log.changes.length} fields`
-  return log.changes.map(c => formatFieldName(c.field)).join(', ')
+  return log.changes.map(c => formatLabel(c.field)).join(', ')
 }
 
 onMounted(async () => {
@@ -225,7 +221,7 @@ onMounted(async () => {
 
                 <template #cell-resource_type="{ item: log }">
                   <div class="py-1">
-                    <span class="text-sm text-muted-foreground">{{ formatFieldName(log.resource_type) }}</span>
+                    <span class="text-sm text-muted-foreground">{{ formatLabel(log.resource_type) }}</span>
                   </div>
                 </template>
 

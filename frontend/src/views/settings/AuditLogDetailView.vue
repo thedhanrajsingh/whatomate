@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import { auditLogsService, type AuditLogEntry } from '@/services/api'
-import { formatDateTime } from '@/lib/utils'
+import { formatDateTime, formatLabel } from '@/lib/utils'
 import { ScrollText, Info, ExternalLink, ArrowRight } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -46,7 +46,7 @@ const resourceLink = computed(() => {
 
 const title = computed(() => {
   if (!log.value) return t('auditLogs.title')
-  return `${formatFieldName(log.value.resource_type)} ${log.value.action}`
+  return `${formatLabel(log.value.resource_type)} ${log.value.action}`
 })
 
 const breadcrumbs = computed(() => [
@@ -54,10 +54,6 @@ const breadcrumbs = computed(() => [
   { label: t('auditLogs.title'), href: '/settings/audit-logs' },
   { label: title.value },
 ])
-
-function formatFieldName(name: string): string {
-  return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-}
 
 function formatValue(val: any): string {
   if (val === null || val === undefined || val === '') return '—'
@@ -118,7 +114,7 @@ onMounted(async () => {
             :key="idx"
             class="rounded-md bg-muted/50 px-3 py-2.5"
           >
-            <span class="text-sm font-medium">{{ formatFieldName(change.field) }}</span>
+            <span class="text-sm font-medium">{{ formatLabel(change.field) }}</span>
             <div class="mt-1 text-sm">
               <template v-if="log.action === 'updated'">
                 <div class="flex items-start gap-2 text-muted-foreground">
@@ -163,7 +159,7 @@ onMounted(async () => {
           </div>
           <div>
             <span class="text-muted-foreground text-xs">{{ t('auditLogs.resource') }}</span>
-            <p class="font-medium">{{ formatFieldName(log.resource_type) }}</p>
+            <p class="font-medium">{{ formatLabel(log.resource_type) }}</p>
           </div>
           <div>
             <span class="text-muted-foreground text-xs">{{ t('auditLogs.date') }}</span>
