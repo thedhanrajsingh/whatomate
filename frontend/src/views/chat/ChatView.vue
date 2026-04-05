@@ -1046,8 +1046,8 @@ function getMessageContent(message: Message): string {
     }
     return message.content?.body || ''
   }
-  if (message.message_type === 'interactive') {
-    // Interactive messages store body text in content (string) or content.body or interactive_data.body
+  if (message.message_type === 'interactive' || message.message_type === 'flow') {
+    // Interactive/flow messages store body text in content (string) or content.body or interactive_data.body
     if (typeof message.content === 'string') {
       return message.content
     }

@@ -277,6 +277,9 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 		msg.Content = req.BodyText
 		msg.InteractiveData = a.buildInteractiveData(req)
 
+	case models.MessageTypeFlow:
+		msg.Content = req.BodyText
+
 	case models.MessageTypeTemplate:
 		if req.Template != nil {
 			// Store actual rendered content instead of just template name
@@ -552,6 +555,8 @@ func (a *App) getMessagePreview(req OutgoingMessageRequest) string {
 		}
 		return "[Document]"
 	case models.MessageTypeInteractive:
+		return truncateString(req.BodyText, 100)
+	case models.MessageTypeFlow:
 		return truncateString(req.BodyText, 100)
 	case models.MessageTypeTemplate:
 		if req.Template != nil {
