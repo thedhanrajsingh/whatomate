@@ -154,6 +154,15 @@ const allVariables = computed(() => {
   return vars
 })
 
+// Detect mixed variable types (positional + named) which are not allowed
+const hasMixedVariables = computed(() => {
+  const vars = allVariables.value
+  if (vars.length === 0) return false
+  const hasPositional = vars.some(v => /^\d+$/.test(v.name))
+  const hasNamed = vars.some(v => !/^\d+$/.test(v.name))
+  return hasPositional && hasNamed
+})
+
 // Build sample_values array from form inputs
 function getSampleValueForVar(component: string, index: number): string {
   const sv = form.value.sample_values.find(
@@ -351,6 +360,10 @@ async function save() {
   }
   if (!form.value.body_content.trim()) {
     toast.error(t('templates.bodyRequired', 'Body content is required'))
+    return
+  }
+  if (hasMixedVariables.value) {
+    toast.error(t('templates.mixedVariables', 'Cannot mix positional ({{1}}, {{2}}) and named ({{name}}) variables. Use one type only.'))
     return
   }
   isSaving.value = true
@@ -680,7 +693,10 @@ onMounted(async () => {
             :rows="6"
             :disabled="!canWrite || !isEditable"
           />
-          <p class="text-xs text-muted-foreground" v-text="bodyHint" />
+          <p v-if="hasMixedVariables" class="text-xs text-destructive">
+            {{ $t('templates.mixedVariables', 'Cannot mix positional ({{1}}, {{2}}) and named ({{name}}) variables. Use one type only.') }}
+          </p>
+          <p v-else class="text-xs text-muted-foreground" v-text="bodyHint" />
         </div>
 
         <!-- Sample Values for Variables -->
