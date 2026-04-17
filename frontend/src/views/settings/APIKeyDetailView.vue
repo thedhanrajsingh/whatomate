@@ -79,8 +79,7 @@ async function loadApiKey() {
   isNotFound.value = false
   try {
     const response = await apiKeysService.get(keyId.value)
-    const data = (response.data as any).data || response.data
-    apiKey.value = data.api_key ?? data
+    apiKey.value = (response.data as any).data || response.data
   } catch {
     isNotFound.value = true
   } finally {

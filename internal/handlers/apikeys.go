@@ -101,6 +101,38 @@ func (a *App) ListAPIKeys(r *fastglue.Request) error {
 	})
 }
 
+// GetAPIKey returns a single API key by ID
+func (a *App) GetAPIKey(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	if err := a.requirePermission(r, userID, models.ResourceAPIKeys, models.ActionRead); err != nil {
+		return nil
+	}
+
+	id, err := parsePathUUID(r, "id", "API key")
+	if err != nil {
+		return nil
+	}
+
+	var apiKey models.APIKey
+	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).First(&apiKey).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "API key not found", nil, "")
+	}
+
+	return r.SendEnvelope(APIKeyResponse{
+		ID:         apiKey.ID,
+		Name:       apiKey.Name,
+		KeyPrefix:  apiKey.KeyPrefix,
+		LastUsedAt: apiKey.LastUsedAt,
+		ExpiresAt:  apiKey.ExpiresAt,
+		IsActive:   apiKey.IsActive,
+		CreatedAt:  apiKey.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	})
+}
+
 // CreateAPIKey creates a new API key
 func (a *App) CreateAPIKey(r *fastglue.Request) error {
 	orgID, userID, err := a.getOrgAndUserID(r)
